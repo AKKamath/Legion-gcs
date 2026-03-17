@@ -32,7 +32,7 @@ void PreSCLoop(int train_step, Runner* runner, RunnerParams* params){
         runner->RunPreSc(params);
     }
     runner->InitializeFeaturesBuffer(params);
-} 
+}
 
 void RunnerLoop(int max_step, Runner* runner, RunnerParams* params){
     for(int i = 0; i < max_step; i++){
@@ -53,7 +53,7 @@ public:
         }
         // monitor_ = new PCM_Monitor();
         // monitor_->Init();
-        
+
         StorageManagement* storage_management = new StorageManagement();
         storage_management->Initialze(shard_count_, in_memory_mode);
         graph_              = storage_management->GetGraph();
@@ -246,7 +246,7 @@ public:
           memorypool_->SetNodeCounter(env->GetNodeCounter(local_dev_id_, i), i);
           memorypool_->SetEdgeCounter(env->GetEdgeCounter(local_dev_id_, i), i);
         }
-        
+
         events_.resize(op_num_);
         op_params_.resize(op_num_);
 
@@ -307,15 +307,20 @@ public:
         memorypool_->SetCurrentMode(mode_);
         memorypool_->SetIter(env->GetLocalBatchId(batch_id));
         env->IPCWait(local_dev_id_, current_pipe_);
-        
+
+        //fprintf(stderr, "Done waiting for pipe %d at %ld ms\n", current_pipe_, std::chrono::duration_cast<std::chrono::milliseconds>(
+        //    std::chrono::system_clock::now().time_since_epoch()).count());
+
         for(int i = 0; i < op_num_; i++){
             if(i % INTRABATCH_CON >= 1){
-                cudaStreamWaitEvent(streams_[i / INTRABATCH_CON], events_[i / INTRABATCH_CON * INTRABATCH_CON], 0);
-            }
+                cudaStreamWaitEvent(streams_[i % INTRABATCH_CON], events_[i / INTRABATCH_CON * INTRABATCH_CON], 0);
+            }/* else if (i != 0){
+                cudaStreamWaitEvent(streams_[i % INTRABATCH_CON], events_[(i - 1) / INTRABATCH_CON * INTRABATCH_CON], 0);
+            }*/
             op_params_[i]->is_presc = false;
             op_factory_[i]->run(op_params_[i]);
         }
-        
+
         bool is_ready = false;
         while(!is_ready){
             if(!(cudaEventQuery((op_params_[op_num_-1]->event)) == cudaErrorNotReady)){
@@ -323,7 +328,26 @@ public:
             }
         }
 
+        /*int32_t *ctr = env->GetEdgeCounter(local_dev_id_, current_pipe_); // make sure edge counter is ready before IPCPost
+        int32_t test[16];
+        cudaMemcpy(test, ctr, 16 * sizeof(int32_t), cudaMemcpyDeviceToHost);
+        printf("Batch %d edge: ", batch_id);
+        for (int i = 0; i < 16; i++)
+            printf("%d ", test[i]);
+        printf("\n");
+
+        ctr = env->GetNodeCounter(local_dev_id_, current_pipe_); // make sure node counter is ready before IPCPost
+        cudaMemcpy(test, ctr, 16 * sizeof(int32_t), cudaMemcpyDeviceToHost);
+        printf("Batch %d node: ", batch_id);
+        for (int i = 0; i < 16; i++)
+            printf("%d ", test[i]);
+        printf("\n");
+
+        fprintf(stderr, "Going to post on pipe %d at %ld ms\n", current_pipe_, std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());*/
         env->IPCPost(local_dev_id_, current_pipe_);
+        //fprintf(stderr, "Posted on pipe %d at %ld ms\n", current_pipe_, std::chrono::duration_cast<std::chrono::milliseconds>(
+        //    std::chrono::system_clock::now().time_since_epoch()).count());
         if(batch_id % 1000 == 0 && local_dev_id_ == 0){
             std::cout<<"batch id: "<<batch_id<<"\n";
         }
@@ -357,7 +381,7 @@ private:
     /*mode, training(0), validation(1), testing(2)*/
     int mode_;
     int op_num_;
-    
+
     std::vector<cudaStream_t> streams_;
     std::vector<cudaEvent_t> events_;
     std::vector<Operator*> op_factory_;
