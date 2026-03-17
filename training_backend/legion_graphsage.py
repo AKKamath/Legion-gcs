@@ -70,7 +70,7 @@ def create_dgl_block(src, dst, num_src_nodes, num_dst_nodes):
     return g
 
 def train_one_step(model, optimizer, loss_fcn, device, feat_len, iter, device_id):
-    
+
     ids, features, labels, block1_agg_src, block1_agg_dst, block2_agg_src, block2_agg_dst = ipc_service.get_next(feat_len)
     block1_src_num, block1_dst_num, block2_src_num, block2_dst_num = ipc_service.get_block_size()
 
@@ -85,13 +85,13 @@ def train_one_step(model, optimizer, loss_fcn, device, feat_len, iter, device_id
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    
+
     torch.cuda.synchronize()
     ipc_service.synchronize()
     return 0
 
 def valid_one_step(model, metric, device, feat_len):
-    
+
     ids, features, labels, block1_agg_src, block1_agg_dst, block2_agg_src, block2_agg_dst = ipc_service.get_next(feat_len)
     block1_src_num, block1_dst_num, block2_src_num, block2_dst_num = ipc_service.get_block_size()
     blocks = []
@@ -105,7 +105,7 @@ def valid_one_step(model, metric, device, feat_len):
     return acc
 
 def test_one_step(model, metric, device, feat_len):
-    
+
     ids, features, labels, block1_agg_src, block1_agg_dst, block2_agg_src, block2_agg_dst = ipc_service.get_next(feat_len)
     block1_src_num, block1_dst_num, block2_src_num, block2_dst_num = ipc_service.get_block_size()
     blocks = []
@@ -150,11 +150,11 @@ def worker_process(rank, world_size, args):
         start = time.time()
         epoch_time = 0
         for iter in range(train_steps):
-            train_loss = train_one_step(model, optimizer, loss_fcn, cuda_device, feat_len, iter, device_id)    
+            train_loss = train_one_step(model, optimizer, loss_fcn, cuda_device, feat_len, iter, device_id)
             # if device_id == 0:
             #     print('Iter {} Train Loss :{} '.format(iter, train_loss))
         epoch_time += time.time() - start
-        
+
         model.eval()
         metric = torchmetrics.Accuracy('multiclass', num_classes = args.class_num)
         metric = metric.to(device_id)
@@ -166,7 +166,7 @@ def worker_process(rank, world_size, args):
         if device_id == 0:
             print("Epoch:{}, Cost:{} s, Val Acc: {}".format(epoch, epoch_time, acc_val))
 
-    
+
     model.eval()
     metric = torchmetrics.Accuracy('multiclass', num_classes = args.class_num)
     metric = metric.to(device_id)

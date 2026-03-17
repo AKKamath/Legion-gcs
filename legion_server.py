@@ -1,5 +1,5 @@
-import os 
-import argparse 
+import os
+import argparse
 import subprocess
 import re
 import networkx as nx
@@ -35,7 +35,7 @@ def find_largest_fully_connected_group(G):
     max_size = max(len(clique) for clique in cliques) if cliques else 1
     max_cliques = [clique for clique in cliques if len(clique) == max_size]
     return max_size, max_cliques
-        
+
 def Run(args):
 
     if args.dataset_name == "products":
@@ -51,7 +51,7 @@ def Run(args):
         vertices_num = 111059956
         edges_num = 1615685872
         features_dim = 128
-        train_set_num = 1207179  
+        train_set_num = 1207179
         valid_set_num = 125265
         test_set_num = 214338
     elif args.dataset_name == "com-friendster":
@@ -89,13 +89,13 @@ def Run(args):
     else:
         print("invalid dataset path")
         exit
-    
+
 
     with open("meta_config","w") as file:
         file.write("{} {} {} {} {} {} {} {} {} {}".format(path, args.train_batch_size, vertices_num, edges_num, features_dim, train_set_num, valid_set_num, test_set_num, args.cache_memory, args.epoch))
 
     gpu_number = args.gpu_number
-    
+
     if args.usenvlink == 1:
         connections = get_nvlink_topology()
         G = nx.Graph()
@@ -114,6 +114,7 @@ def Run(args):
     Legion_home = os.path.dirname(current_file_path)
 
     server_path = os.path.join(Legion_home, "sampling_server/build/bin/sampling_server {} {}").format(gpu_number, cache_agg_mode)
+    print("Starting Legion server with command: {}".format(server_path))
     os.system(server_path)
     ## TODO, integrate Legion server in python module
 
@@ -128,7 +129,7 @@ if __name__ == "__main__":
     argparser.add_argument('--gpu_number', type=int, default=2)
     argparser.add_argument('--epoch', type=int, default=2)
     argparser.add_argument('--cache_memory', type=int, default=38000000)
-    argparser.add_argument('--usenvlink', type=int, default=1)
+    argparser.add_argument('--usenvlink', type=int, default=0)
     args = argparser.parse_args()
 
     Run(args)

@@ -1,7 +1,7 @@
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 import os
-os.environ['CUDA_HOME'] = '/usr/local/cuda'
+#os.environ['CUDA_HOME'] = '/usr/local/cuda'
 setup(
     name='ipcservice',
     ext_modules=[

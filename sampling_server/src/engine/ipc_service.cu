@@ -43,7 +43,7 @@ public:
 
     shm_ = (volatile shmStruct *)info_.addr;
     memset((void *)shm_, 0, sizeof(*shm_));
-    
+
     ids_.resize(device_count);
     float_features_.resize(device_count);
     labels_.resize(device_count);
@@ -56,7 +56,7 @@ public:
     semr_.resize(device_count);
     semw_.resize(device_count);
   }
-  
+
   void Coordinate(BuildInfo* info) override {
     // std::cout<<"Start Coordinate Data Parallel Params\n";
     int32_t partition_count = info->partition_count;
@@ -118,7 +118,7 @@ public:
     std::cout<<"Valid Steps: "<<valid_step_<<"\n";
     std::cout<<"Test Steps: "<<test_step_<<"\n";
     // for(int i = 0; i < partition_count; i++){
-    //   std::cout<<"Train Bs "<<train_batch_size_[i]<<" Valid Bs "<<valid_batch_size_[i]<<" Test Bs "<<test_batch_size_[i]<<"\n"; 
+    //   std::cout<<"Train Bs "<<train_batch_size_[i]<<" Valid Bs "<<valid_batch_size_[i]<<" Test Bs "<<test_batch_size_[i]<<"\n";
     // }
 
     shm_->steps[0] = train_step_;
@@ -180,6 +180,19 @@ public:
       //memory lock
       std::string ssri = ssr + std::to_string(device_id) + "_" + std::to_string(i);
       std::string sswi = ssw + std::to_string(device_id) + "_" + std::to_string(i);
+
+      // Unlink before creating to ensure semaphore is reset
+      int sem = sem_unlink(ssri.c_str());
+      if (sem == -1 && errno != ENOENT) {
+        printf("errno = %d\n", errno );
+        return;
+      }
+      sem = sem_unlink(sswi.c_str());
+      if (sem == -1 && errno != ENOENT) {
+        printf("errno = %d\n", errno );
+        return;
+      }
+
       semr_[device_id][i] = sem_open(ssri.c_str(), O_CREAT | O_RDWR, 0666, 0);
       if (semr_[device_id][i] == SEM_FAILED ){
         printf("errno = %d\n", errno );
@@ -321,7 +334,7 @@ public:
   int32_t GetTrainStep() override {
     return train_step_;
   }
-  
+
 private:
   volatile shmStruct *shm_;
   sharedMemoryInfo info_;
@@ -333,7 +346,7 @@ private:
   std::vector<std::vector<void*>> node_counter_;
   std::vector<std::vector<void*>> edge_counter_;
   std::vector<std::vector<sem_t*>> semr_;
-  std::vector<std::vector<sem_t*>> semw_; 
+  std::vector<std::vector<sem_t*>> semw_;
 
   int32_t raw_batch_size_;
   std::vector<int32_t> train_batch_size_;

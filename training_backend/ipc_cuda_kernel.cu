@@ -33,7 +33,7 @@
   } shmStruct;
 
 class GPUIPCEnv : public IPCEnv {
-public: 
+public:
   int Initialize() override {
     volatile shmStruct *shm = NULL;
     int central_device = -1;
@@ -176,7 +176,7 @@ IPCEnv* NewIPCEnv(){
 
 std::vector<torch::Tensor> cuda_get_next(
     int32_t* ids,
-    float* float_features, 
+    float* float_features,
     int32_t* labels,
     int feature_dim,
     int32_t* agg_src,
@@ -214,7 +214,7 @@ std::vector<torch::Tensor> cuda_get_next(
     torch::Tensor labels_tensor = torch::from_blob(
       labels,
       {(long long)h_node_counter[INTRABATCH_CON * 3]},
-      torch::TensorOptions().dtype(torch::kI32).device(device));   
+      torch::TensorOptions().dtype(torch::kI32).device(device));
 
     ret.push_back(labels_tensor);
 
