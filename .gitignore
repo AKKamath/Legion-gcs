@@ -10,3 +10,4 @@ training_backend/build
 training_backend/dist
 training_backend/ipcservice.egg-info
 dataset/products
+meta_config
