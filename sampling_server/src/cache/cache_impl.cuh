@@ -18,6 +18,8 @@
 
 #include <cstdint>
 #include <sys/mman.h>
+
+#include "client_gpu.cuh"
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
@@ -201,7 +203,7 @@ __global__ void HotnessMeasure(int32_t* new_batch_ids, int32_t* node_counter, un
 
 __global__ void feat_cache_lookup(
 	float* cpu_float_feature, float* gpu_float_feature, int32_t float_feature_len,
-	int32_t* sampled_ids, int32_t* cache_index, 
+	int32_t* sampled_ids, int32_t* cache_index,
     int32_t cpu_cache_capacity, int32_t gpu_cache_capacity,
 	int32_t* node_counter, float* dst_float_buffer,
 	int32_t op_id)
@@ -271,6 +273,127 @@ __global__ void multiGPU_feat_cache_lookup(
 	}
 }
 
+#define GCS_MAX_WARPS_PER_BLOCK 32 // covers up to 1024 threads/block
+
+__global__ void multiGPU_feat_cache_lookup_gcs_nobatch(
+	GpuSharedBuffer* gcs_buf,
+	float* cpu_float_features, float** gpu_float_feature, int32_t float_feature_len,
+	int32_t* sampled_ids, int32_t* cache_index, int32_t cache_capacity,
+	int32_t* node_counter, float* dst_float_buffer,
+	int32_t total_num_nodes,
+	int32_t dev_id,
+	int32_t op_id)
+{
+    int32_t node_off = 0;
+	int32_t batch_size = 0;
+
+    node_off   = node_counter[(op_id % INTRABATCH_CON) * 2];
+    batch_size = node_counter[(op_id % INTRABATCH_CON) * 2 + 1];
+	int32_t gidx;//global cache index
+	int32_t fidx;//local cache index
+	int32_t didx;//device index
+
+	const int warps_per_block = blockDim.x >> 5;
+	const int global_warp     = blockIdx.x * warps_per_block + (threadIdx.x >> 5);
+	const int num_warps       = gridDim.x * warps_per_block;
+	const size_t row_bytes    = (size_t)float_feature_len * sizeof(float);
+
+	if(float_feature_len > 0){
+		for(int64_t row = global_warp; row < batch_size; row += num_warps){
+			gidx = (cache_index[row]);
+			didx = gidx / cache_capacity;//device idx in clique
+			fidx = gidx % cache_capacity;
+			float* dst_row = dst_float_buffer + (size_t)(int64_t(node_off) + row) * float_feature_len;
+			if(gidx < 0){/*cache miss*/
+				fidx = sampled_ids[node_off + row];
+				if(fidx >= 0){
+					const float* src_row = cpu_float_features + (size_t)(fidx % total_num_nodes) * float_feature_len;
+					gpuSysMemcpy_warp(gcs_buf, dst_row, (void*)src_row, row_bytes);
+				}
+			}else{/*cache hit, find global position*/
+				const float* src_row = gpu_float_feature[didx] + (size_t)fidx * float_feature_len;
+				performCopy<32>(dst_row, (void*)src_row, row_bytes);
+			}
+		}
+	}
+}
+
+template <int RowsPerStep>
+__global__ void multiGPU_feat_cache_lookup_gcs(
+	GpuSharedBuffer* gcs_buf,
+	float* cpu_float_features, float** gpu_float_feature, int32_t float_feature_len,
+	int32_t* sampled_ids, int32_t* cache_index, int32_t cache_capacity,
+	int32_t* node_counter, float* dst_float_buffer,
+	int32_t total_num_nodes,
+	int32_t dev_id, int32_t op_id)
+{
+	static_assert(RowsPerStep == 1 || RowsPerStep == 2 || RowsPerStep == 4 || RowsPerStep == 8,
+	              "RowsPerStep must be a power of two in [1, 8]");
+	if (float_feature_len <= 0) return;
+
+	int32_t node_off   = node_counter[(op_id % INTRABATCH_CON) * 2];
+	int32_t batch_size = node_counter[(op_id % INTRABATCH_CON) * 2 + 1];
+
+	const int lane            = threadIdx.x & 31;
+	const int warp_in_block   = threadIdx.x >> 5;
+	const int warps_per_block = blockDim.x >> 5;
+	const int global_warp     = blockIdx.x * warps_per_block + warp_in_block;
+	const int num_warps       = gridDim.x * warps_per_block;
+
+	// Compacted (dst_row, src_row) pairs for this warp's current RowsPerStep-row step.
+	__shared__ int32_t s_dst_idx[GCS_MAX_WARPS_PER_BLOCK][RowsPerStep];
+	__shared__ int32_t s_src_idx[GCS_MAX_WARPS_PER_BLOCK][RowsPerStep];
+	int32_t* my_dst = s_dst_idx[warp_in_block];
+	int32_t* my_src = s_src_idx[warp_in_block];
+
+	const size_t row_bytes = (size_t)float_feature_len * sizeof(float);
+
+	for (int32_t row_base = global_warp * RowsPerStep; row_base < batch_size; row_base += num_warps * RowsPerStep) {
+		bool participates = lane < RowsPerStep;
+		int32_t row = row_base + lane;
+		bool valid = participates && (row < batch_size);
+		int32_t gidx = valid ? cache_index[row] : 0;
+		bool is_miss = valid && (gidx < 0);
+
+		int32_t src_row_id = -1;
+		if (is_miss) {
+			src_row_id = sampled_ids[node_off + row];
+			if (src_row_id < 0) is_miss = false; // matches multiGPU_feat_cache_lookup's fidx>=0 guard: skip, no write
+		}
+
+		// All 32 lanes execute this ballot unconditionally
+		unsigned mask = __ballot_sync(0xFFFFFFFFu, is_miss);
+		int32_t my_pos = __popc(mask & ((1u << lane) - 1)); // exclusive prefix count
+		if (is_miss) {
+			my_dst[my_pos] = node_off + row; // absolute row index into dst_float_buffer
+			my_src[my_pos] = src_row_id % total_num_nodes;
+		}
+		__syncwarp();
+
+		int32_t num_miss = __popc(mask);
+		if (num_miss > 0) {
+			gpuSysMemcpyGather_warp<RowsPerStep>(gcs_buf, dst_float_buffer, my_dst,
+			                                      cpu_float_features, my_src,
+			                                      row_bytes, num_miss);
+		}
+		__syncwarp();
+
+		#pragma unroll
+		for (int r = 0; r < RowsPerStep; r++) {
+			int32_t hit_row = row_base + r;
+			if (hit_row >= batch_size) break;
+			int32_t gidx_r  = __shfl_sync(0xFFFFFFFFu, gidx, r);
+			int32_t valid_r = __shfl_sync(0xFFFFFFFFu, (int32_t)valid, r);
+			if (valid_r && gidx_r >= 0) {
+				int32_t didx = gidx_r / cache_capacity;
+				int32_t fidx = gidx_r % cache_capacity;
+				const float* src_row = gpu_float_feature[didx] + (size_t)fidx * float_feature_len;
+				float* dst_row = dst_float_buffer + (size_t)(node_off + hit_row) * float_feature_len;
+				performCopy<32>(dst_row, (void*)src_row, row_bytes);
+			}
+		}
+	}
+}
 
 
 void mmap_cache_read(std::string &cache_file, std::vector<int32_t>& cache_map){

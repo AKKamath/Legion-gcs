@@ -114,6 +114,9 @@ def Run(args):
     Legion_home = os.path.dirname(current_file_path)
 
     server_path = os.path.join(Legion_home, "sampling_server/build/bin/sampling_server {} {}").format(gpu_number, cache_agg_mode)
+    nvbit_preload = os.environ.get("NVBIT_LD_PRELOAD")
+    if nvbit_preload:
+        server_path = "LD_PRELOAD={} {}".format(nvbit_preload, server_path)
     print("Starting Legion server with command: {}".format(server_path))
     os.system(server_path)
     ## TODO, integrate Legion server in python module

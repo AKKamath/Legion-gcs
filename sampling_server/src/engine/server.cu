@@ -13,6 +13,9 @@
 #include <thread>
 #include <functional>
 #include <chrono>
+#include <cstdlib>
+
+#include "client_sync.h"
 
 
 // Macro for checking cuda errors following a cuda launch or api call
@@ -67,8 +70,18 @@ public:
         runners_.resize(shard_count_);
         params_.resize(shard_count_);
 
+        if (cache_->GCSEnabled() && shard_count_ > 1) {
+            fprintf(stderr, "LEGION_GCS_ENABLED does not yet support gpu_number > 1 "
+                             "(initClient() is a single process-wide registration)\n");
+            exit(EXIT_FAILURE);
+        }
+
         for(int i = 0; i < shard_count_; i++){
             cudaSetDevice(i);
+            if (cache_->GCSEnabled()) {
+                GpuSharedBuffer* gcs_buf = initClient();
+                cache_->SetGCSBuffer(i, gcs_buf);
+            }
             RunnerParams* new_params = new RunnerParams();
             new_params->device_id = i;
             for(int j = 0; j < fanout.size(); j++){

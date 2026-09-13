@@ -11,6 +11,13 @@ THIRD_PARTY_DIR := $(ROOT)/third_party
 PYTHON_DIR := $(ROOT)/python
 SRC_DIR = $(ROOT)/src
 
+# GPUCopyServerClient's client headers (client_gpu.cuh, client_sync.h,
+# shared*.h/.cuh) -- Legion is vendored as a submodule two directories below
+# the repo root. Needed unconditionally: the GCS-backed lookup kernel and
+# initClient() call are compiled in always, gated at runtime by
+# LEGION_GCS_ENABLED (see cache.cu / server.cu), not by a build flag.
+GCS_SRC_DIR := $(ROOT)/../../src
+
 
 clean:
 	@rm -rf $(BUILD_DIR)
@@ -27,6 +34,7 @@ NVCXXFLAGS := -std=c++17 -arch=sm_90a -Xcompiler -Wall \
 			  -I $(SRC_DIR)/engine \
 			  -I $(SRC_DIR)/storage \
 			  -I $(SRC_DIR)/include/hashmap \
+			  -I $(GCS_SRC_DIR) \
 			  -g
 
 
@@ -44,7 +52,7 @@ bin: core
 	$(NVCXX) $(NVCXXFLAGS) \
 		-L /usr/local/cuda/lib64 -L $(BUILD_DIR)/lib \
 		$(CORE_OBJ) \
-		-lcudart -lpthread \
+		-lcudart -lcuda -lpthread \
 		-o $(BIN_DIR)/sampling_server -lrt
 
 
@@ -58,7 +66,7 @@ shared: core
 	$(NVCXX) $(NVCXXFLAGS) -shared \
 		-L /usr/local/cuda/lib64 \
 		$(CORE_OBJ) \
-		-lcudart -lpthread\
+		-lcudart -lcuda -lpthread\
 		-o $(LIB_DIR)/libserver.so -lrt
 
 ################################## core ########################################### 

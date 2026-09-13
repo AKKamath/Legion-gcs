@@ -73,7 +73,7 @@ public:
         cudaSetDevice(device_idx_);
         node_capacity_ = node_capacity;
         edge_capacity_ = edge_capacity;
-        
+
         auto invalid_key = CACHEMISS_FLAG;
         auto invalid_value = CACHEMISS_FLAG;
 
@@ -202,28 +202,28 @@ public:
         //     cudaMemcpy(h_global_count_, d_global_count_, 4, cudaMemcpyDeviceToHost);
         //     h_cache_hit_ += h_global_count_[0];
         //     if(op_id == 8){
-        //         std::cout<<device_idx_<<" Feature Cache Hit: "<<(h_cache_hit_ * 1.0 / h_node_counter[INTRABATCH_CON * 2 + 1])<<std::endl;    
+        //         std::cout<<device_idx_<<" Feature Cache Hit: "<<(h_cache_hit_ * 1.0 / h_node_counter[INTRABATCH_CON * 2 + 1])<<std::endl;
         //         h_cache_hit_ = 0;
         //     }
         // }
         if(op_id == 8){
-            // std::cout<<device_idx_<<" Feature Cache Hit: "<<h_cache_hit_<<" "<<(h_cache_hit_ * 1.0 / h_node_counter[9])<<std::endl;    
+            // std::cout<<device_idx_<<" Feature Cache Hit: "<<h_cache_hit_<<" "<<(h_cache_hit_ * 1.0 / h_node_counter[9])<<std::endl;
             // h_cache_hit_ = 0;
             find_iter_++;
             // std::cout<<"find_iter "<<find_iter_<<std::endl;
         }
     }
 
-    void FindTopo(int32_t* input_ids, 
-                    char* partition_index, 
-                    int32_t* partition_offset, 
-                    int32_t batch_size, 
-                    int32_t op_id, 
-                    void* strm_hdl, 
+    void FindTopo(int32_t* input_ids,
+                    char* partition_index,
+                    int32_t* partition_offset,
+                    int32_t batch_size,
+                    int32_t op_id,
+                    void* strm_hdl,
                     int32_t device_id) override {
         edge_index_map_->find(input_ids, input_ids + batch_size, partition_index, static_cast<cudaStream_t>(strm_hdl));
         edge_offset_map_->find(input_ids, input_ids + batch_size, partition_offset, static_cast<cudaStream_t>(strm_hdl));
-        
+
         // if(find_iter_[device_id] % 500 == 0){
         //     cudaMemsetAsync(d_global_count_[device_id], 0, 4, static_cast<cudaStream_t>(strm_hdl));
         //     dim3 block_num(48, 1);
@@ -233,7 +233,7 @@ public:
         //     h_cache_hit_[device_id] += ((h_global_count_[device_id])[0]);
         //     h_batch_size_[device_id] += batch_size;
         //     if(op_id == 4){
-        //         std::cout<<device_id<<" Topo Cache Hit: "<<h_cache_hit_[device_id]<<" "<<(h_cache_hit_[device_id] * 1.0 / h_batch_size_[device_id])<<std::endl;    
+        //         std::cout<<device_id<<" Topo Cache Hit: "<<h_cache_hit_[device_id]<<" "<<(h_cache_hit_[device_id] * 1.0 / h_batch_size_[device_id])<<std::endl;
         //         h_cache_hit_[device_id] = 0;
         //         h_batch_size_[device_id] = 0;
         //     }
@@ -295,7 +295,7 @@ CacheController* NewPreSCCacheController(int32_t train_step, int32_t device_coun
 void UnifiedCache::Initialize(
     int64_t cache_memory,
     int32_t float_feature_len,
-    int32_t train_step, 
+    int32_t train_step,
     int32_t device_count,
     int32_t cpu_cache_capacity,
     int32_t gpu_cache_capacity)
@@ -318,6 +318,48 @@ void UnifiedCache::Initialize(
     cpu_cache_capacity_ = cpu_cache_capacity;
     gpu_cache_capacity_ = gpu_cache_capacity;
     is_presc_ = true;
+
+    const char* gcs_env = std::getenv("LEGION_GCS_ENABLED");
+    gcs_enabled_ = gcs_env != nullptr && gcs_env[0] != '\0' && gcs_env[0] != '0';
+    gcs_buf_.assign(device_count_, nullptr);
+    if (gcs_enabled_) {
+        std::cout << "UnifiedCache: LEGION_GCS_ENABLED set, feature-cache misses will go through the GPU copy server\n";
+
+        if (const char* nobatch_env = std::getenv("LEGION_GCS_NOBATCH")) {
+            gcs_nobatch_ = nobatch_env[0] != '\0' && nobatch_env[0] != '0';
+        }
+
+        if (const char* cap_env = std::getenv("LEGION_GCS_MERGE_CAP")) {
+            gcs_merge_cap_ = std::atoi(cap_env);
+        }
+        if (gcs_merge_cap_ != 1 && gcs_merge_cap_ != 2 && gcs_merge_cap_ != 4 && gcs_merge_cap_ != 8) {
+            std::cerr << "LEGION_GCS_MERGE_CAP must be 1, 2, 4, or 8; got " << gcs_merge_cap_ << "\n";
+            exit(EXIT_FAILURE);
+        }
+        if (const char* threads_env = std::getenv("LEGION_GCS_THREADS")) {
+            gcs_threads_ = std::atoi(threads_env);
+        } else if (!gcs_nobatch_) {
+            gcs_threads_ = 256;
+        }
+        if (gcs_threads_ <= 0 || gcs_threads_ % 32 != 0 || gcs_threads_ > 1024) {
+            std::cerr << "LEGION_GCS_THREADS must be a positive multiple of 32, <= 1024; got " << gcs_threads_ << "\n";
+            exit(EXIT_FAILURE);
+        }
+        if (gcs_nobatch_) {
+            std::cout << "UnifiedCache: GCS lookup kernel using nobatch (one row per warp), threads_per_block=" << gcs_threads_ << "\n";
+        } else {
+            std::cout << "UnifiedCache: GCS lookup kernel using merge_cap=" << gcs_merge_cap_
+                       << " threads_per_block=" << gcs_threads_ << "\n";
+        }
+    }
+}
+
+bool UnifiedCache::GCSEnabled() const {
+    return gcs_enabled_;
+}
+
+void UnifiedCache::SetGCSBuffer(int32_t dev_id, GpuSharedBuffer* buf) {
+    gcs_buf_[dev_id] = buf;
 }
 
 void UnifiedCache::InitializeCacheController(
@@ -347,9 +389,9 @@ void UnifiedCache::FindFeat(
 void UnifiedCache::FindTopo(
     int32_t* input_ids,
     char* partition_index,
-    int32_t* partition_offset, 
-    int32_t batch_size, 
-    int32_t op_id, 
+    int32_t* partition_offset,
+    int32_t batch_size,
+    int32_t op_id,
     void* strm_hdl,
     int32_t dev_id)
 {
@@ -365,7 +407,7 @@ void UnifiedCache::CandidateSelection(int cache_agg_mode, FeatureStorage* featur
         node_access_time.push_back(cache_controller_[i]->GetNodeAccessedMap());
         edge_access_time.push_back(cache_controller_[i]->GetEdgeAccessedMap());
     }
-    
+
     dim3 block_num(80, 1);
     dim3 thread_num(1024, 1);
 
@@ -456,7 +498,7 @@ void UnifiedCache::CostModel(int cache_agg_mode, FeatureStorage* feature, GraphS
         int max_payload_size = CLS;//64
 
         int64_t memory_step = cache_memory_ * Kg_ * MIN_INTERVAL;
-        uint64_t total_trans_of_topo = counters[0] + counters[1]; 
+        uint64_t total_trans_of_topo = counters[0] + counters[1];
         uint64_t total_trans_of_feat = 0;
         for(int j = 0; j < Kg_; j++){
             total_trans_of_feat += (int64_t((int64_t(int64_t(cache_controller_[j]->MaxIdNum()) * train_step) * float_feature_len) * sizeof(float)) / max_payload_size);
@@ -476,7 +518,7 @@ void UnifiedCache::CostModel(int cache_agg_mode, FeatureStorage* feature, GraphS
         cudaMemcpy(h_edge_prefix, d_edge_prefix, int64_t(int64_t(total_num_nodes)*sizeof(uint64_t)), cudaMemcpyDeviceToHost);
         // std::cout<<"total node hotness "<<h_node_prefix[total_num_nodes - 1]<<" "<<h_node_prefix[0]<<" "<<h_node_prefix[1]<<std::endl;
         // std::cout<<"total edge hotness "<<h_edge_prefix[total_num_nodes - 1]<<std::endl;
-           
+
         int64_t current_mem = 0;
         int64_t total_mem = cache_memory_ * Kg_;//10GB
         int64_t steps = (total_mem  - 1) / memory_step + 1;
@@ -496,7 +538,7 @@ void UnifiedCache::CostModel(int cache_agg_mode, FeatureStorage* feature, GraphS
         GetEdgeMem<<<block_num, thread_num>>>(QT_[i], d_edge_mem, total_num_nodes, csr_index);
         cudaCheckError();
         uint64_t* d_edge_mem_prefix;
-        cudaMalloc(&d_edge_mem_prefix, int64_t(int64_t(total_num_nodes)*sizeof(uint64_t))); 
+        cudaMalloc(&d_edge_mem_prefix, int64_t(int64_t(total_num_nodes)*sizeof(uint64_t)));
         thrust::inclusive_scan(thrust::device, d_edge_mem, d_edge_mem + total_num_nodes, d_edge_mem_prefix);
         cudaCheckError();
         uint64_t* h_edge_mem_prefix = (uint64_t*)malloc(int64_t(int64_t(total_num_nodes)*sizeof(uint64_t)));
@@ -542,10 +584,10 @@ void UnifiedCache::CostModel(int cache_agg_mode, FeatureStorage* feature, GraphS
             trans_of_total[sidx] = trans_of_topo[sidx] + trans_of_feat[steps - 1 - sidx];
             // std::cout<<trans_of_total[sidx]<<std::endl;
         }
-        int max_sidx = std::max_element(trans_of_total.begin(),trans_of_total.end()) - trans_of_total.begin(); 
+        int max_sidx = std::max_element(trans_of_total.begin(),trans_of_total.end()) - trans_of_total.begin();
         std::cout<<"Alpha: "<<(max_sidx * MIN_INTERVAL)<<" Transactions: "<<trans_of_total[max_sidx]<<" on Clique: "<<i<<std::endl;
         node_capacity_.push_back(cap_of_feat[steps - 1 - max_sidx] + 1);//capacity of each GPU
-        edge_capacity_.push_back(cap_of_topo[max_sidx] + 1);   
+        edge_capacity_.push_back(cap_of_topo[max_sidx] + 1);
         std::cout<<"Feat capacity: "<<cap_of_feat[steps-1-max_sidx]<<" Topo capacity: "<<cap_of_topo[max_sidx]<<" on Clique: "<<i<<std::endl;
     }
 }
@@ -568,7 +610,7 @@ void UnifiedCache::FillUp(int cache_agg_mode, FeatureStorage* feature, GraphStor
             cache_controller_[i * Kg_ + j]->Insert(QT_[i], QF_[i], cache_expand, Kg_);
         }
     }
-    
+
     d_float_feature_cache_ptr_.resize(device_count_);
 
     for(int32_t i = 0; i < device_count_; i++){
@@ -580,7 +622,7 @@ void UnifiedCache::FillUp(int cache_agg_mode, FeatureStorage* feature, GraphStor
 
     float* cpu_float_feature = feature->GetAllFloatFeature();
     cpu_float_features_ = cpu_float_feature;
-    
+
     for(int32_t i = 0; i < Kc_; i++){
         for(int32_t j = 0; j < Kg_; j++){
             int32_t dev_id = i * Kg_ + j;
@@ -588,7 +630,7 @@ void UnifiedCache::FillUp(int cache_agg_mode, FeatureStorage* feature, GraphStor
                 cudaSetDevice(dev_id);
                 float* new_float_feature_cache;
                 cudaMalloc(&new_float_feature_cache, int64_t(int64_t(int64_t(node_capacity_[i]) * float_feature_len_) * sizeof(float)));
-                
+
                 FeatFillUp<<<128, 1024>>>(node_capacity_[i], float_feature_len_, new_float_feature_cache, cpu_float_feature, QF_[i], Kg_, j);
                 float_feature_cache_[j] = new_float_feature_cache;
                 init_feature_cache<<<1,1>>>(d_float_feature_cache_ptr_[i * Kg_], new_float_feature_cache, j);//j: device id in clique
@@ -611,7 +653,7 @@ void UnifiedCache::FillUp(int cache_agg_mode, FeatureStorage* feature, GraphStor
 }
 
 
-void UnifiedCache::HybridInit(FeatureStorage* feature, GraphStorage* graph){//multi-gpu 
+void UnifiedCache::HybridInit(FeatureStorage* feature, GraphStorage* graph){//multi-gpu
     cudaSetDevice(0);
     cudaHostAlloc(&cpu_float_features_, int64_t(int64_t(cpu_cache_capacity_) * float_feature_len_ * sizeof(float)), cudaHostAllocMapped);
 
@@ -726,23 +768,72 @@ void UnifiedCache::AccessCount(
 void UnifiedCache::FeatCacheLookup(int32_t* sampled_ids, int32_t* cache_index,
                                     int32_t* node_counter, float* dst_float_buffer,
                                     int32_t op_id, int32_t dev_id, cudaStream_t strm_hdl){
-    dim3 block_num(32, 1);
-	dim3 thread_num(1024, 1);
     float** gpu_float_feature     = Global_Float_Feature_Cache(dev_id);
     int32_t cpu_cache_capacity    = CPUCapacity();
     int32_t gpu_cache_capacity    = GPUCapacity();
     // feat_cache_lookup<<<block_num, thread_num, 0, (strm_hdl)>>>(
     //     cpu_float_features_, float_feature_cache_[0], float_feature_len_,
-    //     sampled_ids, cache_index, 
+    //     sampled_ids, cache_index,
     //     cpu_cache_capacity, gpu_cache_capacity,
     //     node_counter, dst_float_buffer,
     //     op_id
     // );
-    multiGPU_feat_cache_lookup<<<block_num, thread_num, 0, (strm_hdl)>>>(
-        cpu_float_features_, gpu_float_feature, float_feature_len_,
-        sampled_ids, cache_index, NodeCapacity(dev_id),
-        node_counter, dst_float_buffer,
-        total_num_nodes_,
-        dev_id, op_id
-    );
+    if (gcs_enabled_) {
+        // Each warp covers RowsPerStep rows/step (vs. 1 element/thread
+        // below), so far fewer blocks are needed to keep enough warps in
+        // flight to hide PCIe latency on the miss path -- though not too
+        // few: throughput plateaus around 32-132 blocks on an H100, and
+        // fewer badly underuses its 132 SMs (see cache.cuh's
+        // gcs_merge_cap_/gcs_threads_ comment). gcs_nobatch_ picks between
+        // the two GCS-backed kernels (cache_impl.cuh); when not nobatch,
+        // gcs_merge_cap_/gcs_threads_ are the two knobs that trade off
+        // against each other, and the switch instantiates only the one
+        // RowsPerStep actually selected.
+        const int GCS_LOOKUP_BLOCKS = 32;
+        dim3 block_num(GCS_LOOKUP_BLOCKS, 1);
+        dim3 thread_num(gcs_threads_, 1);
+        if (gcs_nobatch_) {
+            multiGPU_feat_cache_lookup_gcs_nobatch<<<block_num, thread_num, 0, (strm_hdl)>>>(
+                gcs_buf_[dev_id], cpu_float_features_, gpu_float_feature, float_feature_len_,
+                sampled_ids, cache_index, NodeCapacity(dev_id), node_counter, dst_float_buffer,
+                total_num_nodes_, dev_id, op_id);
+        } else {
+            switch (gcs_merge_cap_) {
+                case 1:
+                    multiGPU_feat_cache_lookup_gcs<1><<<block_num, thread_num, 0, (strm_hdl)>>>(
+                        gcs_buf_[dev_id], cpu_float_features_, gpu_float_feature, float_feature_len_,
+                        sampled_ids, cache_index, NodeCapacity(dev_id), node_counter, dst_float_buffer,
+                        total_num_nodes_, dev_id, op_id);
+                    break;
+                case 2:
+                    multiGPU_feat_cache_lookup_gcs<2><<<block_num, thread_num, 0, (strm_hdl)>>>(
+                        gcs_buf_[dev_id], cpu_float_features_, gpu_float_feature, float_feature_len_,
+                        sampled_ids, cache_index, NodeCapacity(dev_id), node_counter, dst_float_buffer,
+                        total_num_nodes_, dev_id, op_id);
+                    break;
+                case 4:
+                    multiGPU_feat_cache_lookup_gcs<4><<<block_num, thread_num, 0, (strm_hdl)>>>(
+                        gcs_buf_[dev_id], cpu_float_features_, gpu_float_feature, float_feature_len_,
+                        sampled_ids, cache_index, NodeCapacity(dev_id), node_counter, dst_float_buffer,
+                        total_num_nodes_, dev_id, op_id);
+                    break;
+                default:
+                    multiGPU_feat_cache_lookup_gcs<8><<<block_num, thread_num, 0, (strm_hdl)>>>(
+                        gcs_buf_[dev_id], cpu_float_features_, gpu_float_feature, float_feature_len_,
+                        sampled_ids, cache_index, NodeCapacity(dev_id), node_counter, dst_float_buffer,
+                        total_num_nodes_, dev_id, op_id);
+                    break;
+            }
+        }
+    } else {
+        dim3 block_num(32, 1);
+        dim3 thread_num(1024, 1);
+        multiGPU_feat_cache_lookup<<<block_num, thread_num, 0, (strm_hdl)>>>(
+            cpu_float_features_, gpu_float_feature, float_feature_len_,
+            sampled_ids, cache_index, NodeCapacity(dev_id),
+            node_counter, dst_float_buffer,
+            total_num_nodes_,
+            dev_id, op_id
+        );
+    }
 }
