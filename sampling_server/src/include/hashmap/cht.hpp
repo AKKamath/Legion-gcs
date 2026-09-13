@@ -54,9 +54,9 @@ struct cht {
   using allocator_type = Allocator;
   using hasher = Hash;
   using atomic_pair_allocator_type =
-      typename std::allocator_traits<Allocator>::rebind_alloc<atomic_pair_type>;
+      typename std::allocator_traits<Allocator>::template rebind_alloc<atomic_pair_type>;
   using pool_allocator_type =
-      typename std::allocator_traits<Allocator>::rebind_alloc<bool>;
+      typename std::allocator_traits<Allocator>::template rebind_alloc<bool>;
   using key_equal = KeyEqual;
 
   /**

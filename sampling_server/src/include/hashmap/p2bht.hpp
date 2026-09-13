@@ -58,11 +58,11 @@ struct p2bht {
   using size_type = std::size_t;
 
   using atomic_pair_allocator_type =
-      typename std::allocator_traits<Allocator>::rebind_alloc<atomic_pair_type>;
+      typename std::allocator_traits<Allocator>::template rebind_alloc<atomic_pair_type>;
   using pool_allocator_type =
-      typename std::allocator_traits<Allocator>::rebind_alloc<bool>;
+      typename std::allocator_traits<Allocator>::template rebind_alloc<bool>;
   using size_type_allocator_type =
-      typename std::allocator_traits<Allocator>::rebind_alloc<size_type>;
+      typename std::allocator_traits<Allocator>::template rebind_alloc<size_type>;
 
   static constexpr auto bucket_size = B;
   using key_equal = KeyEqual;
