@@ -11,11 +11,7 @@ THIRD_PARTY_DIR := $(ROOT)/third_party
 PYTHON_DIR := $(ROOT)/python
 SRC_DIR = $(ROOT)/src
 
-# GPUCopyServerClient's client headers (client_gpu.cuh, client_sync.h,
-# shared*.h/.cuh) -- Legion is vendored as a submodule two directories below
-# the repo root. Needed unconditionally: the GCS-backed lookup kernel and
-# initClient() call are compiled in always, gated at runtime by
-# LEGION_GCS_ENABLED (see cache.cu / server.cu), not by a build flag.
+# GPUCopyServerClient's client headers
 GCS_SRC_DIR := $(ROOT)/../../src
 
 
