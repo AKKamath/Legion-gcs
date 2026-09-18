@@ -6,6 +6,7 @@ dataset/gen_legion_xtrapulp_fomat
 dataset/dataset
 dataset/paper100m
 sampling_server/build
+sampling_server/build_llvm/
 training_backend/build
 training_backend/dist
 training_backend/ipcservice.egg-info
