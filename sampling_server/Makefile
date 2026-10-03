@@ -25,6 +25,7 @@ NVCXXFLAGS := -std=c++17 -arch=sm_90a -Xcompiler -Wall \
 			  --extended-lambda \
 			  -Xcompiler -fPIC -lpthread \
 			  --expt-relaxed-constexpr \
+			  -Xptxas="-v" \
 			  -I $(SRC_DIR)/include \
 			  -I $(SRC_DIR)/cache \
 			  -I $(SRC_DIR)/engine \

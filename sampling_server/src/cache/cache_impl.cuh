@@ -372,9 +372,10 @@ __global__ void multiGPU_feat_cache_lookup_gcs(
 
 		int32_t num_miss = __popc(mask);
 		if (num_miss > 0) {
-			gpuSysMemcpyGather_warp<RowsPerStep>(gcs_buf, dst_float_buffer, my_dst,
-			                                      cpu_float_features, my_src,
-			                                      row_bytes, num_miss);
+			constexpr int kGatherMaxMerge = (RowsPerStep <= 4) ? RowsPerStep : 4;
+			gpuSysMemcpyGather_warp<kGatherMaxMerge>(gcs_buf, dst_float_buffer, my_dst,
+			                                          cpu_float_features, my_src,
+			                                          row_bytes, num_miss);
 		}
 		__syncwarp();
 
