@@ -148,6 +148,7 @@ def worker_process(rank, world_size, args):
     for epoch in range(epoch_num):
         forward = 0
         start = time.time()
+        start_mono = time.monotonic()
         epoch_time = 0
         for iter in range(train_steps):
             train_loss = train_one_step(model, optimizer, loss_fcn, cuda_device, feat_len, iter, device_id)
@@ -164,7 +165,9 @@ def worker_process(rank, world_size, args):
                 valid_one_step(model, metric, cuda_device, feat_len)
             acc_val = metric.compute()
         if device_id == 0:
-            print("Epoch:{}, Cost:{} s, Val Acc: {}".format(epoch, epoch_time, acc_val))
+            # Wall (for nvidia-smi dmon) and monotonic ms (for the copy benchmarks' timestamps).
+            print("Epoch:{}, Cost:{} s, Val Acc: {}, Wall: {:.3f} {:.3f}, Mono_ms: {:.0f} {:.0f}".format(
+                epoch, epoch_time, acc_val, start, time.time(), start_mono * 1000, time.monotonic() * 1000))
 
 
     model.eval()
