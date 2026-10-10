@@ -308,7 +308,7 @@ __global__ void multiGPU_feat_cache_lookup_gcs_nobatch(
 				fidx = sampled_ids[node_off + row];
 				if(fidx >= 0){
 					const float* src_row = cpu_float_features + (size_t)(fidx % total_num_nodes) * float_feature_len;
-					gpuSysMemcpy_warp(gcs_buf, dst_row, (void*)src_row, row_bytes);
+					gpuSysMemcpy_warp(gcs_buf, dst_row, (void*)src_row, row_bytes, DIR_H2D);
 				}
 			}else{/*cache hit, find global position*/
 				const float* src_row = gpu_float_feature[didx] + (size_t)fidx * float_feature_len;
@@ -375,7 +375,7 @@ __global__ void multiGPU_feat_cache_lookup_gcs(
 			constexpr int kGatherMaxMerge = (RowsPerStep <= 4) ? RowsPerStep : 4;
 			gpuSysMemcpyGather_warp<kGatherMaxMerge>(gcs_buf, dst_float_buffer, my_dst,
 			                                          cpu_float_features, my_src,
-			                                          row_bytes, num_miss);
+			                                          row_bytes, num_miss, DIR_H2D);
 		}
 		__syncwarp();
 
