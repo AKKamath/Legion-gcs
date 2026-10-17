@@ -24,7 +24,7 @@
   }
 
 //assume no duplicate
-__global__ void batch_generate(
+__global__ void __launch_bounds__(OP_THREAD_NUM) batch_generate(
 	int32_t* batch_ids, 
 	int32_t* labels, 
 	int32_t batch_size, 
@@ -172,7 +172,7 @@ void BatchGenerate(
 }
 
 /////////random sampler//////////
-__global__ void random_sample(
+__global__ void __launch_bounds__(OP_THREAD_NUM) random_sample(
 	int32_t*  sampled_ids,
 	int32_t   op_id,
 	int64_t** csr_node_index, 
@@ -280,7 +280,7 @@ __global__ void random_sample(
 	}
 }
 
-__global__ void construct_graph(int32_t* agg_src_ids, int32_t* agg_dst_ids, 
+__global__ void __launch_bounds__(OP_THREAD_NUM) construct_graph(int32_t* agg_src_ids, int32_t* agg_dst_ids, 
 								int32_t* agg_src_off, int32_t* agg_dst_off,
 								int32_t* position_map, int32_t* edge_counter, int32_t* node_counter, int32_t op_id, int32_t dev_id){
 	int32_t edge_num = edge_counter[2];
@@ -298,7 +298,7 @@ __global__ void construct_graph(int32_t* agg_src_ids, int32_t* agg_dst_ids,
 
 
 /////////random sampler//////////
-__global__ void pre_sample(
+__global__ void __launch_bounds__(OP_THREAD_NUM) pre_sample(
 	int32_t*  sampled_ids,
 	int32_t   op_id,
 	int64_t* csr_node_index, 
@@ -539,7 +539,7 @@ void IOSubmit(
 }
 
 
-__global__ void ClearPosMap(int32_t* position_map, int32_t* sampled_ids, int32_t* node_counter){
+__global__ void __launch_bounds__(OP_THREAD_NUM) ClearPosMap(int32_t* position_map, int32_t* sampled_ids, int32_t* node_counter){
 	int32_t batch_size = node_counter[INTRABATCH_CON * 2 + 1];
 	for(int32_t idx = threadIdx.x + blockDim.x * blockIdx.x; idx < batch_size; idx += gridDim.x * blockDim.x){
 		int32_t sampled_id = sampled_ids[idx];
