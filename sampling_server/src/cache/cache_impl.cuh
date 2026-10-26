@@ -284,6 +284,8 @@ __global__ void multiGPU_feat_cache_lookup_gcs_nobatch(
 	int32_t dev_id,
 	int32_t op_id)
 {
+	__shared__ GpuBlockCredits gcs_bc;  // the block's credit pool (used when the server enables it)
+	gpuSysBlockInit(gcs_buf, &gcs_bc);
     int32_t node_off = 0;
 	int32_t batch_size = 0;
 
@@ -308,7 +310,7 @@ __global__ void multiGPU_feat_cache_lookup_gcs_nobatch(
 				fidx = sampled_ids[node_off + row];
 				if(fidx >= 0){
 					const float* src_row = cpu_float_features + (size_t)(fidx % total_num_nodes) * float_feature_len;
-					gpuSysMemcpy_warp(gcs_buf, dst_row, (void*)src_row, row_bytes, DIR_H2D);
+					gpuSysMemcpy_warp(gcs_buf, dst_row, (void*)src_row, row_bytes, DIR_H2D, &gcs_bc);
 				}
 			}else{/*cache hit, find global position*/
 				const float* src_row = gpu_float_feature[didx] + (size_t)fidx * float_feature_len;
@@ -316,6 +318,7 @@ __global__ void multiGPU_feat_cache_lookup_gcs_nobatch(
 			}
 		}
 	}
+	gpuSysBlockExit(gcs_buf, &gcs_bc);
 }
 
 template <int RowsPerStep>
@@ -330,6 +333,8 @@ __global__ void multiGPU_feat_cache_lookup_gcs(
 	static_assert(RowsPerStep == 1 || RowsPerStep == 2 || RowsPerStep == 4 || RowsPerStep == 8,
 	              "RowsPerStep must be a power of two in [1, 8]");
 	if (float_feature_len <= 0) return;
+	__shared__ GpuBlockCredits gcs_bc;  // the block's credit pool (used when the server enables it)
+	gpuSysBlockInit(gcs_buf, &gcs_bc);
 
 	int32_t node_off   = node_counter[(op_id % INTRABATCH_CON) * 2];
 	int32_t batch_size = node_counter[(op_id % INTRABATCH_CON) * 2 + 1];
@@ -375,7 +380,7 @@ __global__ void multiGPU_feat_cache_lookup_gcs(
 			constexpr int kGatherMaxMerge = (RowsPerStep <= 4) ? RowsPerStep : 4;
 			gpuSysMemcpyGather_warp<kGatherMaxMerge>(gcs_buf, dst_float_buffer, my_dst,
 			                                          cpu_float_features, my_src,
-			                                          row_bytes, num_miss, DIR_H2D);
+			                                          row_bytes, num_miss, DIR_H2D, &gcs_bc);
 		}
 		__syncwarp();
 
@@ -394,6 +399,7 @@ __global__ void multiGPU_feat_cache_lookup_gcs(
 			}
 		}
 	}
+	gpuSysBlockExit(gcs_buf, &gcs_bc);
 }
 
 
